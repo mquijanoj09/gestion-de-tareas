@@ -115,8 +115,8 @@ jobs:
           TF_VAR_lab_role_arn:      ${{ vars.LAB_ROLE_ARN }}
           TF_VAR_vpc_id:            ${{ vars.VPC_ID }}
         run: |
-          BACKEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-backend:sha-${{ needs.gate.outputs.image_tag }}"
-          FRONTEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-frontend:sha-${{ needs.gate.outputs.image_tag }}"
+          BACKEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-backend:latest"
+          FRONTEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-frontend:latest"
           echo "Backend  image: $BACKEND_URI"
           echo "Frontend image: $FRONTEND_URI"
 
@@ -244,8 +244,8 @@ jobs:
           TF_VAR_lab_role_arn:      ${{ vars.LAB_ROLE_ARN }}
           TF_VAR_vpc_id:            ${{ vars.VPC_ID }}
         run: |
-          BACKEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-backend:sha-${{ needs.gate.outputs.image_tag }}"
-          FRONTEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-frontend:sha-${{ needs.gate.outputs.image_tag }}"
+          BACKEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-backend:latest"
+          FRONTEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-frontend:latest"
 
           SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
             awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
