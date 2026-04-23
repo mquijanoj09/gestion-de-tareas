@@ -11,9 +11,9 @@
     "prisma:migrate:dev": "dotenv -e ../.env -- prisma migrate dev",
     "prisma:migrate:deploy": "dotenv -e ../.env -- prisma migrate deploy",
     "seed": "dotenv -e ../.env -- tsx prisma/seed.ts",
-    "test": "jest --runInBand",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage --runInBand",
+    "test": "dotenv -e ../.env -- jest --runInBand",
+    "test:watch": "dotenv -e ../.env -- jest --watch",
+    "test:coverage": "dotenv -e ../.env -- jest --coverage --runInBand",
     "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
     "lint:fix": "eslint 'src/**/*.ts' 'tests/**/*.ts' --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit"

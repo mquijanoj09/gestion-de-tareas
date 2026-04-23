@@ -1,5 +1,23 @@
 import axios from 'axios';
-import { getErrorMessage } from '../apiClient';
+import { api, getErrorMessage } from '../apiClient';
+
+describe('api instance', () => {
+  it('has JSON headers and a baseURL', () => {
+    expect(api.defaults.headers['Content-Type']).toBe('application/json');
+    expect(typeof api.defaults.baseURL).toBe('string');
+  });
+
+  it('falls back to VITE_API_URL from process.env when set', () => {
+    const prev = process.env.VITE_API_URL;
+    process.env.VITE_API_URL = 'https://example.test/api';
+    jest.resetModules();
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require('../apiClient') as typeof import('../apiClient');
+    expect(mod.api.defaults.baseURL).toBe('https://example.test/api');
+    if (prev === undefined) delete process.env.VITE_API_URL;
+    else process.env.VITE_API_URL = prev;
+  });
+});
 
 describe('getErrorMessage', () => {
   it('returns the API error message when provided', () => {
