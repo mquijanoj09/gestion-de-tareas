@@ -1,0 +1,26 @@
+node_modules
+dist
+build
+coverage
+.env
+.env.local
+*.log
+.DS_Store
+.vscode
+.idea
+
+# Prisma
+backend/prisma/migrations/dev.db*
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+
+# Cypress
+e2e/cypress/videos
+e2e/cypress/screenshots
+e2e/cypress/downloads

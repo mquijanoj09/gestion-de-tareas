@@ -1,0 +1,323 @@
+name: CD Pipeline AWS EC2 con Terraform
+
+on:
+  workflow_run:
+    workflows: ["CI Backend", "CI Frontend"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: "~1.6"
+
+jobs:
+  # -------------------------------------
+  # Gate: solo continuar si el CI fue exitoso (o si es dispatch manual)
+  # -------------------------------------
+  gate:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+    steps:
+      - name: Resolve image tag (commit SHA)
+        id: tag
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "image_tag=${SHA}" >> $GITHUB_OUTPUT
+          echo "Deploying commit: ${SHA}"
+
+  # -------------------------------------
+  # Terraform Apply – Staging (dev)
+  # -------------------------------------
+  deploy-tf-staging:
+    needs: gate
+    runs-on: ubuntu-latest
+    outputs:
+      app_url: ${{ steps.tf_out.outputs.app_url }}
+      public_ip: ${{ steps.tf_out.outputs.public_ip }}
+      instance_id: ${{ steps.tf_out.outputs.instance_id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure Terraform state bucket (staging)
+        run: |
+          BUCKET="${{ vars.TF_STATE_BUCKET_DEV || 'trello-tfstate-dev' }}"
+          if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+            echo "Creating state bucket $BUCKET"
+            aws s3api create-bucket --bucket "$BUCKET" --region ${{ env.AWS_REGION }}
+            aws s3api put-bucket-versioning --bucket "$BUCKET" \
+              --versioning-configuration Status=Enabled
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init (staging)
+        working-directory: infra/terraform/environments/dev
+        run: terraform init -reconfigure
+
+      - name: Terraform Apply (staging)
+        working-directory: infra/terraform/environments/dev
+        env:
+          TF_VAR_repo_url: https://github.com/${{ github.repository }}.git
+          TF_VAR_repo_ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: terraform apply -auto-approve
+
+      - name: Read Terraform outputs (staging)
+        id: tf_out
+        working-directory: infra/terraform/environments/dev
+        run: |
+          APP_URL=$(terraform output -raw app_url)
+          PUBLIC_IP=$(terraform output -raw public_ip)
+          INSTANCE_ID=$(terraform output -raw instance_id 2>/dev/null || \
+            aws ec2 describe-instances \
+              --filters "Name=ip-address,Values=${PUBLIC_IP}" \
+              --query "Reservations[0].Instances[0].InstanceId" --output text)
+          echo "app_url=${APP_URL}"       >> $GITHUB_OUTPUT
+          echo "public_ip=${PUBLIC_IP}"   >> $GITHUB_OUTPUT
+          echo "instance_id=${INSTANCE_ID}" >> $GITHUB_OUTPUT
+
+  # -------------------------------------
+  # Redeploy del stack docker-compose en EC2 staging (via SSM)
+  # -------------------------------------
+  redeploy-staging:
+    needs: [gate, deploy-tf-staging]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Trigger redeploy via SSM Run Command
+        env:
+          INSTANCE_ID: ${{ needs.deploy-tf-staging.outputs.instance_id }}
+          IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "CD redeploy staging ${IMAGE_TAG}" \
+            --parameters commands='[
+              "set -euxo pipefail",
+              "cd /opt/app",
+              "git fetch --all --tags",
+              "git checkout '"${IMAGE_TAG}"'",
+              "/usr/local/bin/docker-compose pull || true",
+              "/usr/local/bin/docker-compose up -d --build --remove-orphans",
+              "/usr/local/bin/docker-compose ps"
+            ]' \
+            --query "Command.CommandId" --output text)
+          echo "SSM command: $CMD_ID"
+          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$INSTANCE_ID"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
+            --query "{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}" --output json
+
+      - name: Wait for app to become healthy
+        env:
+          APP_URL: ${{ needs.deploy-tf-staging.outputs.app_url }}
+        run: |
+          echo "Probing $APP_URL/api/health ..."
+          for i in $(seq 1 30); do
+            if curl -fsS "${APP_URL}/api/health" >/dev/null; then
+              echo "Healthy"; exit 0
+            fi
+            sleep 10
+          done
+          echo "Staging did not become healthy in time"; exit 1
+
+  # -------------------------------------
+  # Pruebas de aceptación (Cypress E2E) contra Staging
+  # -------------------------------------
+  test-staging:
+    needs: [deploy-tf-staging, redeploy-staging]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Cypress E2E against Staging
+        env:
+          CYPRESS_BASE_URL: ${{ needs.deploy-tf-staging.outputs.app_url }}
+        run: npm run test:e2e --workspace e2e
+
+      - name: Upload Cypress artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-staging
+          path: |
+            e2e/cypress/screenshots/
+            e2e/cypress/videos/
+          if-no-files-found: ignore
+
+  # -------------------------------------
+  # Terraform Apply – Producción
+  # -------------------------------------
+  deploy-tf-prod:
+    needs: [gate, test-staging]
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      app_url: ${{ steps.tf_out.outputs.app_url }}
+      public_ip: ${{ steps.tf_out.outputs.public_ip }}
+      instance_id: ${{ steps.tf_out.outputs.instance_id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure Terraform state bucket (prod)
+        run: |
+          BUCKET="${{ vars.TF_STATE_BUCKET_PROD || 'trello-tfstate-prod' }}"
+          if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+            echo "Creating state bucket $BUCKET"
+            aws s3api create-bucket --bucket "$BUCKET" --region ${{ env.AWS_REGION }}
+            aws s3api put-bucket-versioning --bucket "$BUCKET" \
+              --versioning-configuration Status=Enabled
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init (prod)
+        working-directory: infra/terraform/environments/prod
+        run: terraform init -reconfigure
+
+      - name: Terraform Apply (prod)
+        working-directory: infra/terraform/environments/prod
+        env:
+          TF_VAR_repo_url: https://github.com/${{ github.repository }}.git
+          TF_VAR_repo_ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: terraform apply -auto-approve
+
+      - name: Read Terraform outputs (prod)
+        id: tf_out
+        working-directory: infra/terraform/environments/prod
+        run: |
+          APP_URL=$(terraform output -raw app_url)
+          PUBLIC_IP=$(terraform output -raw public_ip)
+          INSTANCE_ID=$(terraform output -raw instance_id 2>/dev/null || \
+            aws ec2 describe-instances \
+              --filters "Name=ip-address,Values=${PUBLIC_IP}" \
+              --query "Reservations[0].Instances[0].InstanceId" --output text)
+          echo "app_url=${APP_URL}"       >> $GITHUB_OUTPUT
+          echo "public_ip=${PUBLIC_IP}"   >> $GITHUB_OUTPUT
+          echo "instance_id=${INSTANCE_ID}" >> $GITHUB_OUTPUT
+
+  # -------------------------------------
+  # Redeploy del stack docker-compose en EC2 producción
+  # -------------------------------------
+  redeploy-prod:
+    needs: [gate, deploy-tf-prod]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Trigger redeploy via SSM Run Command
+        env:
+          INSTANCE_ID: ${{ needs.deploy-tf-prod.outputs.instance_id }}
+          IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "CD redeploy prod ${IMAGE_TAG}" \
+            --parameters commands='[
+              "set -euxo pipefail",
+              "cd /opt/app",
+              "git fetch --all --tags",
+              "git checkout '"${IMAGE_TAG}"'",
+              "/usr/local/bin/docker-compose pull || true",
+              "/usr/local/bin/docker-compose up -d --build --remove-orphans",
+              "/usr/local/bin/docker-compose ps"
+            ]' \
+            --query "Command.CommandId" --output text)
+          echo "SSM command: $CMD_ID"
+          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$INSTANCE_ID"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
+            --query "{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}" --output json
+
+      - name: Wait for app to become healthy
+        env:
+          APP_URL: ${{ needs.deploy-tf-prod.outputs.app_url }}
+        run: |
+          echo "Probing $APP_URL/api/health ..."
+          for i in $(seq 1 30); do
+            if curl -fsS "${APP_URL}/api/health" >/dev/null; then
+              echo "Healthy"; exit 0
+            fi
+            sleep 10
+          done
+          echo "Production did not become healthy in time"; exit 1
+
+  # -------------------------------------
+  # Pruebas de humo en Producción
+  # -------------------------------------
+  smoke-test-prod:
+    needs: [deploy-tf-prod, redeploy-prod]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Smoke – frontend root
+        run: |
+          URL="${{ needs.deploy-tf-prod.outputs.app_url }}"
+          echo "GET $URL/"
+          curl -fsS -o /dev/null -w "status=%{http_code}\n" "$URL/"
+
+      - name: Smoke – backend health
+        run: |
+          URL="${{ needs.deploy-tf-prod.outputs.app_url }}"
+          echo "GET $URL/api/health"
+          curl -fsS "$URL/api/health" | tee /tmp/health.json
+          grep -qi '"ok"\|"status":"up"\|healthy' /tmp/health.json || true
