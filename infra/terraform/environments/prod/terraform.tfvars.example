@@ -1,0 +1,6 @@
+aws_region = "us-east-1"
+azs        = ["us-east-1a", "us-east-1b"]
+admin_cidr = "203.0.113.10/32"
+key_name   = "prod-keypair"
+repo_url   = "https://github.com/<owner>/gestion-de-tareas.git"
+repo_ref   = "main"
