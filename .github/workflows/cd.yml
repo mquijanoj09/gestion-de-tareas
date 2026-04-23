@@ -192,14 +192,17 @@ jobs:
             --comment "CD redeploy ${IMAGE_TAG}" \
             --cloud-watch-output-config CloudWatchOutputEnabled=false \
             --parameters commands='[
-              "set -euxo pipefail",
+              "set -uxo pipefail",
+              "exec > >(tee -a /var/log/cd-deploy.log) 2>&1",
+              "echo === free -h ===; free -h",
+              "echo === df -h ===; df -h /",
               "for i in $(seq 1 60); do [ -d /opt/app/.git ] && break; echo waiting for user_data clone...; sleep 10; done",
               "cd /opt/app",
               "git fetch --all --tags",
               "git checkout '"${IMAGE_TAG}"' || git checkout -B deploy-'"${IMAGE_TAG}"' '"${IMAGE_TAG}"'",
               "/usr/local/bin/docker-compose pull || true",
               "/usr/local/bin/docker-compose down --remove-orphans || true",
-              "/usr/local/bin/docker-compose up -d --build --remove-orphans",
+              "if ! /usr/local/bin/docker-compose up -d --build --remove-orphans; then echo === BUILD FAILED ===; echo --- compose logs ---; /usr/local/bin/docker-compose logs --tail=200 || true; echo --- docker ps ---; docker ps -a; echo --- journalctl docker ---; journalctl -u docker --no-pager -n 100 || true; tail -n 200 /var/log/cd-deploy.log; exit 1; fi",
               "/usr/local/bin/docker-compose ps"
             ]' \
             --query "Command.CommandId" --output text)
