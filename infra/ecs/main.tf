@@ -124,16 +124,17 @@ resource "aws_ecs_task_definition" "app" {
   family                   = "${local.name}-task"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "1024"
-  memory                   = "2048"
+  cpu                      = "2048"
+  memory                   = "4096"
   task_role_arn            = var.lab_role_arn
   execution_role_arn       = var.lab_role_arn
 
   container_definitions = jsonencode([
     {
-      name      = "postgres"
-      image     = "postgres:16-alpine"
-      essential = true
+      name        = "postgres"
+      image       = "postgres:16-alpine"
+      essential   = true
+      stopTimeout = 30
       portMappings = [
         { containerPort = 5432, protocol = "tcp" }
       ]
@@ -159,9 +160,10 @@ resource "aws_ecs_task_definition" "app" {
       }
     },
     {
-      name      = "backend"
-      image     = var.backend_image_uri
-      essential = true
+      name        = "backend"
+      image       = var.backend_image_uri
+      essential   = true
+      stopTimeout = 30
       dependsOn = [
         { containerName = "postgres", condition = "HEALTHY" }
       ]
@@ -192,11 +194,12 @@ resource "aws_ecs_task_definition" "app" {
       }
     },
     {
-      name      = "frontend"
-      image     = var.frontend_image_uri
-      essential = true
+      name        = "frontend"
+      image       = var.frontend_image_uri
+      essential   = true
+      stopTimeout = 30
       dependsOn = [
-        { containerName = "backend", condition = "HEALTHY" }
+        { containerName = "backend", condition = "START" }
       ]
       # El nginx.conf original proxya a `backend:3000`. En Fargate (awsvpc) los contenedores
       # comparten localhost, así que reemplazamos `backend` por 127.0.0.1 al arrancar.
