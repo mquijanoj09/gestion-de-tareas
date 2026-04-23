@@ -20,13 +20,13 @@ RUN npm -w shared run build \
 FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN apk add --no-cache openssl && addgroup -S app && adduser -S app -G app
-COPY --from=build /repo/backend/dist ./dist
-COPY --from=build /repo/node_modules ./node_modules
-COPY --from=build /repo/backend/prisma ./prisma
-COPY --from=build /repo/backend/package.json ./package.json
-COPY --from=build /repo/shared/dist ./node_modules/shared/dist
-COPY --from=build /repo/shared/package.json ./node_modules/shared/package.json
+RUN apk add --no-cache openssl libssl3 && addgroup -S app && adduser -S app -G app
+COPY --from=build --chown=app:app /repo/backend/dist ./dist
+COPY --from=build --chown=app:app /repo/node_modules ./node_modules
+COPY --from=build --chown=app:app /repo/backend/prisma ./prisma
+COPY --from=build --chown=app:app /repo/backend/package.json ./package.json
+COPY --from=build --chown=app:app /repo/shared/dist ./node_modules/shared/dist
+COPY --from=build --chown=app:app /repo/shared/package.json ./node_modules/shared/package.json
 USER app
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
