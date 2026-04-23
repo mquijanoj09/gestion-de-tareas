@@ -9,8 +9,7 @@ RUN npm install --workspaces --include-workspace-root --no-audit --no-fund
 FROM node:20-alpine AS build
 WORKDIR /repo
 COPY --from=deps /repo/node_modules node_modules
-COPY --from=deps /repo/shared/node_modules shared/node_modules
-COPY --from=deps /repo/backend/node_modules backend/node_modules
+COPY package.json package-lock.json* ./
 COPY tsconfig*.json ./
 COPY shared shared
 COPY backend backend
@@ -23,7 +22,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 RUN addgroup -S app && adduser -S app -G app
 COPY --from=build /repo/backend/dist ./dist
-COPY --from=build /repo/backend/node_modules ./node_modules
+COPY --from=build /repo/node_modules ./node_modules
 COPY --from=build /repo/backend/prisma ./prisma
 COPY --from=build /repo/backend/package.json ./package.json
 COPY --from=build /repo/shared/dist ./node_modules/shared/dist

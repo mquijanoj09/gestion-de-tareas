@@ -9,8 +9,7 @@ RUN npm install --workspaces --include-workspace-root --no-audit --no-fund
 FROM node:20-alpine AS build
 WORKDIR /repo
 COPY --from=deps /repo/node_modules node_modules
-COPY --from=deps /repo/shared/node_modules shared/node_modules
-COPY --from=deps /repo/frontend/node_modules frontend/node_modules
+COPY package.json package-lock.json* ./
 COPY shared shared
 COPY frontend frontend
 ARG VITE_API_URL=/api
