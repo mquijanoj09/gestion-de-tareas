@@ -31,4 +31,4 @@ USER app
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
-CMD ["sh","-c","npx prisma migrate deploy && node dist/server.js"]
+CMD ["sh","-c","npx prisma db push --accept-data-loss --skip-generate && node dist/server.js"]
