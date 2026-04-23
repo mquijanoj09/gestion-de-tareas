@@ -51,6 +51,15 @@ locals {
     systemctl enable --now docker
     # SSM agent is preinstalled on AL2023; ensure it's running for remote redeploys
     systemctl enable --now amazon-ssm-agent || true
+
+    # 4GB swap: small instances (t3.small, 2 GiB) OOM while building Node workspaces
+    if [ ! -f /swapfile ]; then
+      fallocate -l 4G /swapfile
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
     curl -SL https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 \
       -o /usr/local/bin/docker-compose
     chmod +x /usr/local/bin/docker-compose
