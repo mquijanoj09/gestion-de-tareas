@@ -56,8 +56,10 @@ locals {
     chmod +x /usr/local/bin/docker-compose
 
     cd /opt
-    git clone --branch ${var.repo_ref} ${var.repo_url} app
+    git clone ${var.repo_url} app
     cd app
+    git fetch --all --tags
+    git checkout ${var.repo_ref} || git checkout -B deploy-${var.repo_ref} ${var.repo_ref}
 
     cat > .env <<ENVEOF
     NODE_ENV=production
