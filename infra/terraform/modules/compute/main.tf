@@ -69,7 +69,8 @@ locals {
     LOG_LEVEL=info
     ENVEOF
 
-    /usr/local/bin/docker-compose up -d --build
+    # Deployment (docker-compose up) is driven by the CD pipeline via SSM,
+    # to avoid racing with the remote redeploy build.
   EOT
 }
 
