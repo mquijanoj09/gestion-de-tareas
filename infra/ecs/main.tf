@@ -31,7 +31,7 @@ resource "aws_ecs_cluster" "main" {
 
 # --- Seguridad ---
 resource "aws_security_group" "alb_sg" {
-  name        = "alb-sg-${var.environment_name}-v2"
+  name_prefix = "alb-sg-${var.environment_name}-"
   description = "Permite trafico HTTP al ALB"
   vpc_id      = var.vpc_id
 
@@ -50,11 +50,15 @@ resource "aws_security_group" "alb_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  lifecycle {
+    create_before_destroy = true
+  }
+
   tags = { Environment = var.environment_name }
 }
 
 resource "aws_security_group" "ecs_sg" {
-  name        = "ecs-service-sg-${var.environment_name}-v2"
+  name_prefix = "ecs-service-sg-${var.environment_name}-"
   description = "Permite trafico desde el ALB al servicio ECS"
   vpc_id      = var.vpc_id
 
@@ -71,6 +75,10 @@ resource "aws_security_group" "ecs_sg" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 
   tags = { Environment = var.environment_name }
