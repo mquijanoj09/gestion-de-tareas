@@ -31,7 +31,7 @@ resource "aws_ecs_cluster" "main" {
 
 # --- Seguridad ---
 resource "aws_security_group" "alb_sg" {
-  name        = "alb-sg-${var.environment_name}"
+  name        = "alb-sg-${var.environment_name}-v2"
   description = "Permite trafico HTTP al ALB"
   vpc_id      = var.vpc_id
 
@@ -54,7 +54,7 @@ resource "aws_security_group" "alb_sg" {
 }
 
 resource "aws_security_group" "ecs_sg" {
-  name        = "ecs-service-sg-${var.environment_name}"
+  name        = "ecs-service-sg-${var.environment_name}-v2"
   description = "Permite trafico desde el ALB al servicio ECS"
   vpc_id      = var.vpc_id
 
