@@ -154,6 +154,8 @@ jobs:
   redeploy-staging:
     needs: [gate, deploy-tf-staging]
     runs-on: ubuntu-latest
+    env:
+      TARGET_INSTANCE_ID: ${{ needs.deploy-tf-staging.outputs.instance_id }}
     steps:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -163,29 +165,58 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Wait for instance to register with SSM
+        env:
+          INSTANCE_ID: ${{ env.TARGET_INSTANCE_ID }}
+        run: |
+          echo "Waiting for $INSTANCE_ID to become SSM-managed..."
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+              --query "InstanceInformationList[0].PingStatus" --output text 2>/dev/null || echo "None")
+            if [ "$STATUS" = "Online" ]; then
+              echo "SSM online"; exit 0
+            fi
+            echo "  attempt $i: $STATUS"; sleep 10
+          done
+          echo "Instance never registered with SSM"; exit 1
+
       - name: Trigger redeploy via SSM Run Command
         env:
-          INSTANCE_ID: ${{ needs.deploy-tf-staging.outputs.instance_id }}
+          INSTANCE_ID: ${{ env.TARGET_INSTANCE_ID }}
           IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
         run: |
           CMD_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --comment "CD redeploy staging ${IMAGE_TAG}" \
+            --comment "CD redeploy ${IMAGE_TAG}" \
+            --cloud-watch-output-config CloudWatchOutputEnabled=false \
             --parameters commands='[
               "set -euxo pipefail",
+              "for i in $(seq 1 60); do [ -d /opt/app/.git ] && break; echo waiting for user_data clone...; sleep 10; done",
               "cd /opt/app",
               "git fetch --all --tags",
-              "git checkout '"${IMAGE_TAG}"'",
+              "git checkout '"${IMAGE_TAG}"' || git checkout -B deploy-'"${IMAGE_TAG}"' '"${IMAGE_TAG}"'",
               "/usr/local/bin/docker-compose pull || true",
               "/usr/local/bin/docker-compose up -d --build --remove-orphans",
               "/usr/local/bin/docker-compose ps"
             ]' \
             --query "Command.CommandId" --output text)
           echo "SSM command: $CMD_ID"
-          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$INSTANCE_ID"
+          # Poll instead of `wait command-executed` (which times out at 10 min and doesnt tolerate InProgress)
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
+              --query "Status" --output text 2>/dev/null || echo "Pending")
+            echo "  SSM status: $STATUS"
+            case "$STATUS" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut) EXIT=1; break ;;
+            esac
+            sleep 15
+          done
           aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
             --query "{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}" --output json
+          [ "${EXIT:-0}" -eq 0 ]
 
       - name: Wait for app to become healthy
         env:
@@ -317,6 +348,8 @@ jobs:
   redeploy-prod:
     needs: [gate, deploy-tf-prod]
     runs-on: ubuntu-latest
+    env:
+      TARGET_INSTANCE_ID: ${{ needs.deploy-tf-prod.outputs.instance_id }}
     steps:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4

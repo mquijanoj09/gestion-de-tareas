@@ -27,6 +27,11 @@ variable "repo_ref" {
   type    = string
   default = "main"
 }
+variable "iam_instance_profile" {
+  type        = string
+  description = "EC2 instance profile name. Must grant AmazonSSMManagedInstanceCore so CD can run redeploys via SSM."
+  default     = "LabInstanceProfile"
+}
 
 data "aws_ami" "al2023" {
   most_recent = true
@@ -44,6 +49,8 @@ locals {
     dnf update -y
     dnf install -y docker git
     systemctl enable --now docker
+    # SSM agent is preinstalled on AL2023; ensure it's running for remote redeploys
+    systemctl enable --now amazon-ssm-agent || true
     curl -SL https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 \
       -o /usr/local/bin/docker-compose
     chmod +x /usr/local/bin/docker-compose
@@ -71,7 +78,9 @@ resource "aws_instance" "app" {
   vpc_security_group_ids      = [var.app_sg_id]
   associate_public_ip_address = true
   key_name                    = var.key_name
+  iam_instance_profile        = var.iam_instance_profile
   user_data                   = local.user_data
+  user_data_replace_on_change = true
 
   root_block_device {
     volume_size = 30
