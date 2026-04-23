@@ -9,3 +9,7 @@ output "public_ip" {
 output "rds_endpoint" {
   value = module.database.endpoint
 }
+
+output "instance_id" {
+  value = module.compute.instance_id
+}
