@@ -198,6 +198,7 @@ jobs:
               "git fetch --all --tags",
               "git checkout '"${IMAGE_TAG}"' || git checkout -B deploy-'"${IMAGE_TAG}"' '"${IMAGE_TAG}"'",
               "/usr/local/bin/docker-compose pull || true",
+              "/usr/local/bin/docker-compose down --remove-orphans || true",
               "/usr/local/bin/docker-compose up -d --build --remove-orphans",
               "/usr/local/bin/docker-compose ps"
             ]' \
