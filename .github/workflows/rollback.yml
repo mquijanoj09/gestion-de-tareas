@@ -72,8 +72,8 @@ jobs:
     if: github.event.inputs.environment == 'staging' || github.event.inputs.environment == 'both'
     runs-on: ubuntu-latest
     outputs:
-      cluster_name: ${{ steps.tf_out.outputs.cluster_name }}
-      service_name: ${{ steps.tf_out.outputs.service_name }}
+      cluster_name: ${{ steps.current.outputs.cluster_name }}
+      service_name: ${{ steps.current.outputs.service_name }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -159,8 +159,8 @@ jobs:
     if: github.event.inputs.environment == 'production' || github.event.inputs.environment == 'both'
     runs-on: ubuntu-latest
     outputs:
-      cluster_name: ${{ steps.tf_out.outputs.cluster_name }}
-      service_name: ${{ steps.tf_out.outputs.service_name }}
+      cluster_name: ${{ steps.current.outputs.cluster_name }}
+      service_name: ${{ steps.current.outputs.service_name }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
