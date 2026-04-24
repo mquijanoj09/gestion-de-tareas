@@ -27,11 +27,7 @@ export function BoardsPage() {
     <main className="mx-auto max-w-5xl p-6">
       <header className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold">Tableros</h1>
-        <Button
-          data-testid="new-board-btn"
-          onClick={() => setOpen(true)}
-          className="bg-purple-400 hover:bg-purple-500"
-        >
+        <Button data-testid="new-board-btn" onClick={() => setOpen(true)}>
           + Nuevo tablero
         </Button>
       </header>
