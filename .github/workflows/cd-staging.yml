@@ -28,9 +28,9 @@ jobs:
       - name: Resolve image tag (commit SHA)
         id: tag
         run: |
-          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
-          echo "image_tag=sha-${SHA}" >> $GITHUB_OUTPUT
-          echo "Deploying commit: ${SHA}"
+          # Use 'latest' tag for staging as it's more reliable and already pushed by CI
+          echo "image_tag=latest" >> $GITHUB_OUTPUT
+          echo "Deploying with latest tag"
 
       - name: Ensure both CI workflows succeeded for this SHA
         id: check
