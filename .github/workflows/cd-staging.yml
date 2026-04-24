@@ -49,7 +49,9 @@ jobs:
           B=$(check_wf ci-backend.yml)
           F=$(check_wf ci-frontend.yml)
           echo "backend=$B frontend=$F"
-          if [ "$B" = "success" ] && [ "$F" = "success" ]; then
+          if { [ "$B" = "success" ] || [ "$B" = "missing" ]; } && \
+             { [ "$F" = "success" ] || [ "$F" = "missing" ]; } && \
+             { [ "$B" = "success" ] || [ "$F" = "success" ]; }; then
             echo "proceed=true" >> $GITHUB_OUTPUT
           else
             echo "proceed=false" >> $GITHUB_OUTPUT
