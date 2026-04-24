@@ -21,6 +21,10 @@ jobs:
       image_tag: ${{ steps.tag.outputs.image_tag }}
       proceed: ${{ steps.check.outputs.proceed }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Resolve image tag (commit SHA)
         id: tag
         run: |
@@ -38,7 +42,15 @@ jobs:
             echo "proceed=true" >> $GITHUB_OUTPUT
             exit 0
           fi
-          CHANGED_FILES=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
+          BEFORE_SHA="${{ github.event.before }}"
+          if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED_FILES=$(git show --pretty="" --name-only "${{ github.sha }}")
+          elif git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            CHANGED_FILES=$(git diff --name-only "${BEFORE_SHA}" "${{ github.sha }}")
+          else
+            echo "before SHA not present locally, falling back to current commit files"
+            CHANGED_FILES=$(git show --pretty="" --name-only "${{ github.sha }}")
+          fi
           NEED_BACKEND=false
           NEED_FRONTEND=false
           while IFS= read -r f; do
