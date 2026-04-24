@@ -13,6 +13,8 @@ on:
       - 'package-lock.json'
       - 'tsconfig*.json'
       - '.github/workflows/ci-frontend.yml'
+      - '.github/workflows/cd-staging.yml'
+      - '.github/workflows/cd-production.yml'
   pull_request:
     branches:
       - develop
@@ -24,6 +26,8 @@ on:
       - 'package-lock.json'
       - 'tsconfig*.json'
       - '.github/workflows/ci-frontend.yml'
+      - '.github/workflows/cd-staging.yml'
+      - '.github/workflows/cd-production.yml'
   workflow_dispatch:
 
 jobs:
