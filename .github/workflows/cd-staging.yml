@@ -38,6 +38,24 @@ jobs:
             echo "proceed=true" >> $GITHUB_OUTPUT
             exit 0
           fi
+          CHANGED_FILES=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
+          NEED_BACKEND=false
+          NEED_FRONTEND=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              backend/*|shared/*|package.json|package-lock.json|tsconfig*.json|.github/workflows/ci-backend.yml)
+                NEED_BACKEND=true
+                ;;
+            esac
+            case "$f" in
+              frontend/*|shared/*|package.json|package-lock.json|tsconfig*.json|.github/workflows/ci-frontend.yml)
+                NEED_FRONTEND=true
+                ;;
+            esac
+          done <<< "$CHANGED_FILES"
+          echo "need_backend=$NEED_BACKEND need_frontend=$NEED_FRONTEND"
+
           check_wf() {
             gh api "repos/${REPO}/actions/workflows/$1/runs?head_sha=${SHA}&per_page=1" \
               --jq '.workflow_runs[0].conclusion // "missing"'
@@ -45,8 +63,10 @@ jobs:
           for i in $(seq 1 30); do
             B=$(check_wf ci-backend.yml)
             F=$(check_wf ci-frontend.yml)
-            echo "attempt=$i backend=$B frontend=$F"
-            if [ "$B" = "success" ] && [ "$F" = "success" ]; then
+            [ "$NEED_BACKEND" = "false" ] && B="skipped"
+            [ "$NEED_FRONTEND" = "false" ] && F="skipped"
+            echo "attempt=$i backend=$B frontend=$F need_backend=$NEED_BACKEND need_frontend=$NEED_FRONTEND"
+            if { [ "$B" = "success" ] || [ "$B" = "skipped" ]; } && { [ "$F" = "success" ] || [ "$F" = "skipped" ]; }; then
               echo "proceed=true" >> $GITHUB_OUTPUT
               exit 0
             fi
