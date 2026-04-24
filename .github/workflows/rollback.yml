@@ -43,7 +43,7 @@ jobs:
       - name: Validate version exists
         id: validate
         env:
-          TARGET_VERSION: ${{ github.inputs.target_version }}
+          TARGET_VERSION: ${{ github.event.inputs.target_version }}
         run: |
           # Check if it's a valid tag or SHA
           if [[ "$TARGET_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -69,7 +69,7 @@ jobs:
   # -------------------------------------
   rollback-staging:
     needs: validate
-    if: github.inputs.environment == 'staging' || github.inputs.environment == 'both'
+    if: github.event.inputs.environment == 'staging' || github.event.inputs.environment == 'both'
     runs-on: ubuntu-latest
     outputs:
       cluster_name: ${{ steps.tf_out.outputs.cluster_name }}
@@ -149,14 +149,14 @@ jobs:
       - name: Verify rollback
         run: |
           echo "✅ Staging rollback completed to version: ${{ needs.validate.outputs.image_tag }}"
-          echo "📝 Reason: ${{ github.inputs.reason || 'Not provided' }}"
+          echo "📝 Reason: ${{ github.event.inputs.reason || 'Not provided' }}"
 
   # -------------------------------------
   # Rollback Production
   # -------------------------------------
   rollback-production:
     needs: validate
-    if: github.inputs.environment == 'production' || github.inputs.environment == 'both'
+    if: github.event.inputs.environment == 'production' || github.event.inputs.environment == 'both'
     runs-on: ubuntu-latest
     outputs:
       cluster_name: ${{ steps.tf_out.outputs.cluster_name }}
@@ -236,7 +236,7 @@ jobs:
       - name: Verify rollback
         run: |
           echo "✅ Production rollback completed to version: ${{ needs.validate.outputs.image_tag }}"
-          echo "📝 Reason: ${{ github.inputs.reason || 'Not provided' }}"
+          echo "📝 Reason: ${{ github.event.inputs.reason || 'Not provided' }}"
 
   # -------------------------------------
   # Summary
@@ -250,9 +250,9 @@ jobs:
         run: |
           echo "## 🔴 Rollback Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Target Version:** ${{ github.inputs.target_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ github.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Reason:** ${{ github.inputs.reason || 'Not provided' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Version:** ${{ github.event.inputs.target_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Reason:** ${{ github.event.inputs.reason || 'Not provided' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           STAGING_STATUS="${{ needs.rollback-staging.result }}"
