@@ -25,12 +25,29 @@ jobs:
       image_tag: ${{ steps.tag.outputs.image_tag }}
       proceed: ${{ steps.check.outputs.proceed }}
     steps:
-      - name: Resolve image tag (commit SHA)
+      - name: Resolve image tag
         id: tag
         run: |
-          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
-          echo "image_tag=sha-${SHA}" >> $GITHUB_OUTPUT
-          echo "Deploying commit: ${SHA}"
+          # Check if this is a semantic version tag (v*.*.*)
+          TAG="${{ github.ref_name }}"
+
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            # This is a semantic version tag - use it directly
+            echo "image_tag=$TAG" >> $GITHUB_OUTPUT
+            echo "Using semantic version tag: $TAG"
+          else
+            # Check if there's a version tag on the current commit
+            VERSION_TAG=$(git describe --tags --abbrev=0 --match 'v*.*.*' 2>/dev/null || echo "")
+            if [ -n "$VERSION_TAG" ]; then
+              echo "image_tag=$VERSION_TAG" >> $GITHUB_OUTPUT
+              echo "Using version tag from commit: $VERSION_TAG"
+            else
+              # Default to SHA-based tag
+              SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+              echo "image_tag=sha-${SHA}" >> $GITHUB_OUTPUT
+              echo "Deploying commit: ${SHA}"
+            fi
+          fi
 
       - name: Ensure both CI workflows succeeded for this SHA
         id: check
