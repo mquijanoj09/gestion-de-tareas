@@ -2,8 +2,10 @@ import axios from 'axios';
 
 function readBaseUrl(): string {
   try {
-    // Vite injects import.meta.env; guarded so Jest (CommonJS) won't crash.
-    const env = (import.meta as unknown as { env?: { VITE_API_URL?: string } }).env;
+    // Indirect access so Jest's CommonJS transform doesn't choke on import.meta.
+    const env = new Function('try { return import.meta.env } catch { return undefined }')() as
+      | { VITE_API_URL?: string }
+      | undefined;
     if (env?.VITE_API_URL) return env.VITE_API_URL;
   } catch {
     // ignore

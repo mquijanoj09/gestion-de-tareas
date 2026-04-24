@@ -12,12 +12,7 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": ".",
-    "baseUrl": ".",
-    "paths": {
-      "shared": ["../shared/src"],
-      "shared/*": ["../shared/src/*"]
-    }
+    "rootDir": "."
   },
   "include": ["src/**/*", "prisma/**/*", "tests/**/*"]
 }
