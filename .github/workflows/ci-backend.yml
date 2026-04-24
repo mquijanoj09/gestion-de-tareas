@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - 'feat/**'
+      - develop
     paths:
       - 'backend/**'
       - 'shared/**'
@@ -12,8 +13,11 @@ on:
       - 'package-lock.json'
       - 'tsconfig*.json'
       - '.github/workflows/ci-backend.yml'
+      - '.github/workflows/cd-staging.yml'
+      - '.github/workflows/cd-production.yml'
   pull_request:
     branches:
+      - develop
       - main
     paths:
       - 'backend/**'
@@ -22,6 +26,8 @@ on:
       - 'package-lock.json'
       - 'tsconfig*.json'
       - '.github/workflows/ci-backend.yml'
+      - '.github/workflows/cd-staging.yml'
+      - '.github/workflows/cd-production.yml'
   workflow_dispatch:
 
 jobs:
@@ -105,14 +111,14 @@ jobs:
           tags: |
             type=sha,format=long
             type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/develop' }}
 
       - name: Build and push backend image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./backend/Dockerfile
-          push: true
+          push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

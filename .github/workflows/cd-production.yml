@@ -1,4 +1,4 @@
-name: CD Pipeline AWS ECS con Terraform
+name: CD Production AWS ECS con Terraform
 
 on:
   workflow_run:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: cd-${{ github.ref }}
+  group: cd-production-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -16,9 +16,6 @@ env:
   TF_VERSION: '~1.6'
 
 jobs:
-  # -------------------------------------
-  # Gate: sólo continuar si ambos CI succedieron para el mismo SHA
-  # -------------------------------------
   gate:
     runs-on: ubuntu-latest
     if: >
@@ -32,7 +29,7 @@ jobs:
         id: tag
         run: |
           SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
-          echo "image_tag=${SHA}" >> $GITHUB_OUTPUT
+          echo "image_tag=sha-${SHA}" >> $GITHUB_OUTPUT
           echo "Deploying commit: ${SHA}"
 
       - name: Ensure both CI workflows succeeded for this SHA
@@ -58,144 +55,9 @@ jobs:
             echo "proceed=false" >> $GITHUB_OUTPUT
           fi
 
-  # -------------------------------------
-  # Terraform Apply Staging
-  # -------------------------------------
-  deploy-tf-staging:
+  deploy-tf-prod:
     needs: gate
     if: needs.gate.outputs.proceed == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      alb_url_staging: ${{ steps.tf_out.outputs.alb_url }}
-      cluster_name_staging: ${{ steps.tf_out.outputs.cluster_name }}
-      service_name_staging: ${{ steps.tf_out.outputs.service_name }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Ensure Terraform State Bucket
-        run: |
-          if [ -z "${{ vars.TF_STATE_BUCKET }}" ]; then
-            echo "Error: define la variable TF_STATE_BUCKET"; exit 1
-          fi
-          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET }}" 2>/dev/null; then
-            echo "Bucket ya existe"
-          else
-            aws s3api create-bucket --bucket "${{ vars.TF_STATE_BUCKET }}" --region ${{ env.AWS_REGION }}
-          fi
-          aws s3api put-bucket-versioning \
-            --bucket "${{ vars.TF_STATE_BUCKET }}" \
-            --versioning-configuration Status=Enabled
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-
-      - name: Terraform Init (staging)
-        working-directory: infra/ecs
-        run: |
-          terraform init -reconfigure \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
-            -backend-config="key=staging/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}"
-
-      - name: Terraform Apply (staging)
-        working-directory: infra/ecs
-        env:
-          TF_VAR_environment_name: staging
-          TF_VAR_lab_role_arn: ${{ vars.LAB_ROLE_ARN }}
-          TF_VAR_vpc_id: ${{ vars.VPC_ID }}
-        run: |
-          BACKEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-backend:latest"
-          FRONTEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-frontend:latest"
-          echo "Backend  image: $BACKEND_URI"
-          echo "Frontend image: $FRONTEND_URI"
-
-          SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
-            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
-
-          terraform apply -auto-approve \
-            -var="backend_image_uri=${BACKEND_URI}" \
-            -var="frontend_image_uri=${FRONTEND_URI}" \
-            -var="subnet_ids=${SUBNET_LIST}"
-
-      - name: Get Terraform Outputs (staging)
-        id: tf_out
-        working-directory: infra/ecs
-        run: |
-          ALB_URL=$(terraform output -raw alb_url)
-          CLUSTER=$(terraform output -raw ecs_cluster_name)
-          SERVICE=$(terraform output -raw ecs_service_name)
-          echo "alb_url=${ALB_URL}"       >> $GITHUB_OUTPUT
-          echo "cluster_name=${CLUSTER}"  >> $GITHUB_OUTPUT
-          echo "service_name=${SERVICE}"  >> $GITHUB_OUTPUT
-
-  # -------------------------------------
-  # Forzar nuevo deployment del servicio staging
-  # -------------------------------------
-  update-service-staging:
-    needs: [gate, deploy-tf-staging]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Force new deployment ECS staging
-        run: |
-          aws ecs update-service \
-            --cluster "${{ needs.deploy-tf-staging.outputs.cluster_name_staging }}" \
-            --service "${{ needs.deploy-tf-staging.outputs.service_name_staging }}" \
-            --force-new-deployment \
-            --region ${{ env.AWS_REGION }}
-          aws ecs wait services-stable \
-            --cluster "${{ needs.deploy-tf-staging.outputs.cluster_name_staging }}" \
-            --services "${{ needs.deploy-tf-staging.outputs.service_name_staging }}" \
-            --region ${{ env.AWS_REGION }}
-
-  # -------------------------------------
-  # Pruebas de aceptación en Staging (Cypress)
-  # -------------------------------------
-  test-staging:
-    needs: [update-service-staging, deploy-tf-staging]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run Cypress E2E against Staging
-        env:
-          CYPRESS_BASE_URL: ${{ needs.deploy-tf-staging.outputs.alb_url_staging }}
-        run: |
-          echo "Running acceptance tests against: $CYPRESS_BASE_URL"
-          sleep 30
-          npm run test:e2e --workspace e2e
-
-  # -------------------------------------
-  # Terraform Apply Producción
-  # -------------------------------------
-  deploy-tf-prod:
-    needs: [gate, test-staging]
     runs-on: ubuntu-latest
     outputs:
       alb_url_prod: ${{ steps.tf_out.outputs.alb_url }}
@@ -240,12 +102,13 @@ jobs:
       - name: Terraform Apply (production)
         working-directory: infra/ecs
         env:
+          IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
           TF_VAR_environment_name: production
           TF_VAR_lab_role_arn: ${{ vars.LAB_ROLE_ARN }}
           TF_VAR_vpc_id: ${{ vars.VPC_ID }}
         run: |
-          BACKEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-backend:latest"
-          FRONTEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-frontend:latest"
+          BACKEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-backend:${IMAGE_TAG}"
+          FRONTEND_URI="${{ vars.DOCKERHUB_USERNAME }}/gestion-de-tareas-frontend:${IMAGE_TAG}"
 
           SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
             awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
@@ -266,9 +129,6 @@ jobs:
           echo "cluster_name=${CLUSTER}"  >> $GITHUB_OUTPUT
           echo "service_name=${SERVICE}"  >> $GITHUB_OUTPUT
 
-  # -------------------------------------
-  # Forzar nuevo deployment del servicio prod
-  # -------------------------------------
   update-service-prod:
     needs: [gate, deploy-tf-prod]
     runs-on: ubuntu-latest
@@ -293,9 +153,6 @@ jobs:
             --services "${{ needs.deploy-tf-prod.outputs.service_name_prod }}" \
             --region ${{ env.AWS_REGION }}
 
-  # -------------------------------------
-  # Smoke tests en Producción
-  # -------------------------------------
   smoke-test-prod:
     needs: [update-service-prod, deploy-tf-prod]
     runs-on: ubuntu-latest
@@ -306,7 +163,7 @@ jobs:
         id: tag
         run: |
           SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
-          echo "image_tag=${SHA}" >> $GITHUB_OUTPUT
+          echo "image_tag=sha-${SHA}" >> $GITHUB_OUTPUT
 
       - name: Smoke – frontend root
         run: |
@@ -321,9 +178,6 @@ jobs:
           echo "GET $URL/api/health"
           curl -fsS "$URL/api/health"
 
-  # -------------------------------------
-  # Automatic Rollback on Smoke Test Failure
-  # -------------------------------------
   auto-rollback:
     needs: [deploy-tf-prod, smoke-test-prod]
     if: failure() && needs.smoke-test-prod.outputs.image_tag != ''
@@ -336,7 +190,6 @@ jobs:
         env:
           CURRENT_SHA: ${{ needs.smoke-test-prod.outputs.image_tag }}
         run: |
-          # Get the previous stable tag (not the current one)
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "latest")
           echo "previous_tag=${PREVIOUS_TAG}" >> $GITHUB_OUTPUT
           echo "Current deployment failed: $CURRENT_SHA"
