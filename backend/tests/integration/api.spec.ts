@@ -111,7 +111,11 @@ describe('Additional coverage', () => {
   it('GET /api/health returns ok', async () => {
     const res = await request(app).get('/api/health');
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('ok');
+    expect(res.body).toMatchObject({
+      status: 'ok',
+      db: 'ok',
+      buildMarker: 'deploy-check-2026-04-23',
+    });
   });
 
   it('GET /api/boards/:id returns board with lists', async () => {
