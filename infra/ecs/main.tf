@@ -84,6 +84,79 @@ resource "aws_security_group" "ecs_sg" {
   tags = { Environment = var.environment_name }
 }
 
+resource "aws_security_group" "efs_sg" {
+  name_prefix = "efs-sg-${var.environment_name}-"
+  description = "Permite NFS desde las tareas ECS al EFS de Postgres"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "NFS desde las tareas ECS"
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ecs_sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = { Environment = var.environment_name }
+}
+
+# --- EFS para persistir los datos de Postgres entre despliegues ---
+resource "aws_efs_file_system" "pgdata" {
+  creation_token   = "${local.name}-pgdata"
+  encrypted        = true
+  performance_mode = "generalPurpose"
+  throughput_mode  = "bursting"
+
+  lifecycle_policy {
+    transition_to_ia = "AFTER_30_DAYS"
+  }
+
+  tags = {
+    Environment = var.environment_name
+    Name        = "${local.name}-pgdata"
+  }
+}
+
+resource "aws_efs_mount_target" "pgdata" {
+  for_each        = toset(var.subnet_ids)
+  file_system_id  = aws_efs_file_system.pgdata.id
+  subnet_id       = each.value
+  security_groups = [aws_security_group.efs_sg.id]
+}
+
+# El access point fija uid/gid 70 (usuario `postgres` en la imagen alpine)
+# y crea el subdirectorio /pgdata con permisos 0700 que Postgres exige.
+resource "aws_efs_access_point" "pgdata" {
+  file_system_id = aws_efs_file_system.pgdata.id
+
+  posix_user {
+    uid = 70
+    gid = 70
+  }
+
+  root_directory {
+    path = "/pgdata"
+    creation_info {
+      owner_uid   = 70
+      owner_gid   = 70
+      permissions = "0700"
+    }
+  }
+
+  tags = { Environment = var.environment_name }
+}
+
 # --- Load Balancer ---
 resource "aws_lb" "main" {
   name               = "${local.name}-alb"
@@ -150,6 +223,13 @@ resource "aws_ecs_task_definition" "app" {
         { name = "POSTGRES_USER", value = "trello" },
         { name = "POSTGRES_PASSWORD", value = var.postgres_password },
         { name = "POSTGRES_DB", value = "trello" }
+      ]
+      mountPoints = [
+        {
+          sourceVolume  = "pgdata"
+          containerPath = "/var/lib/postgresql/data"
+          readOnly      = false
+        }
       ]
       healthCheck = {
         command     = ["CMD-SHELL", "pg_isready -U trello -d trello"]
@@ -228,6 +308,22 @@ resource "aws_ecs_task_definition" "app" {
       }
     }
   ])
+
+  volume {
+    name = "pgdata"
+
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.pgdata.id
+      transit_encryption = "ENABLED"
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.pgdata.id
+        iam             = "DISABLED"
+      }
+    }
+  }
+
+  depends_on = [aws_efs_mount_target.pgdata]
 
   tags = { Environment = var.environment_name }
 }
