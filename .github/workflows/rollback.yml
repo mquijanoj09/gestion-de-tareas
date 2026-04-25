@@ -133,6 +133,7 @@ jobs:
             -var="subnet_ids=${SUBNET_LIST}"
 
       - name: Force new deployment ECS staging
+        if: github.event.inputs.environment == 'staging' || github.event.inputs.environment == 'both'
         env:
           IMAGE_TAG: ${{ needs.validate.outputs.image_tag }}
         run: |
@@ -220,6 +221,7 @@ jobs:
             -var="subnet_ids=${SUBNET_LIST}"
 
       - name: Force new deployment ECS production
+        if: github.event.inputs.environment == 'production' || github.event.inputs.environment == 'both'
         env:
           IMAGE_TAG: ${{ needs.validate.outputs.image_tag }}
         run: |
@@ -242,7 +244,7 @@ jobs:
   # Summary
   # -------------------------------------
   summary:
-    needs: [rollback-staging, rollback-production]
+    needs: [validate, rollback-staging, rollback-production]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -255,12 +257,27 @@ jobs:
           echo "**Reason:** ${{ github.event.inputs.reason || 'Not provided' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          STAGING_STATUS="${{ needs.rollback-staging.result }}"
-          PROD_STATUS="${{ needs.rollback-production.result }}"
+          # Check if staging job ran
+          if [[ "${{ needs.rollback-staging.result }}" == "skipped" ]]; then
+            STAGING_STATUS="⏭️ Skipped"
+          elif [[ "${{ needs.rollback-staging.result }}" == "success" ]]; then
+            STAGING_STATUS="✅ Success"
+          else
+            STAGING_STATUS="❌ ${{ needs.rollback-staging.result }}"
+          fi
+
+          # Check if production job ran
+          if [[ "${{ needs.rollback-production.result }}" == "skipped" ]]; then
+            PROD_STATUS="⏭️ Skipped"
+          elif [[ "${{ needs.rollback-production.result }}" == "success" ]]; then
+            PROD_STATUS="✅ Success"
+          else
+            PROD_STATUS="❌ ${{ needs.rollback-production.result }}"
+          fi
 
           echo "### Rollback Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Staging | ${{ needs.rollback-staging.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Production | ${{ needs.rollback-production.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging | $STAGING_STATUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Production | $PROD_STATUS |" >> $GITHUB_STEP_SUMMARY
