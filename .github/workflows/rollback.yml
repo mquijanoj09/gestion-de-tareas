@@ -71,9 +71,7 @@ jobs:
     needs: validate
     if: github.event.inputs.environment == 'staging' || github.event.inputs.environment == 'both'
     runs-on: ubuntu-latest
-    outputs:
-      cluster_name: ${{ steps.current.outputs.cluster_name }}
-      service_name: ${{ steps.current.outputs.service_name }}
+    # outputs removed: cluster_name/service_name now fetched directly from AWS
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -137,14 +135,23 @@ jobs:
         env:
           IMAGE_TAG: ${{ needs.validate.outputs.image_tag }}
         run: |
+          CLUSTER_NAME="gestion-staging-cluster"
+          # Get the service name directly from ECS
+          SERVICE_ARN=$(aws ecs list-services --cluster "$CLUSTER_NAME" --region ${{ env.AWS_REGION }} --query 'serviceArns[0]' --output text)
+          SERVICE_NAME=$(echo "$SERVICE_ARN" | sed 's|.*/||')
+          
+          echo "🔄 Forcing new deployment on cluster: $CLUSTER_NAME, service: $SERVICE_NAME"
+          
           aws ecs update-service \
-            --cluster "${{ needs.rollback-staging.outputs.cluster_name }}" \
-            --service "${{ needs.rollback-staging.outputs.service_name }}" \
+            --cluster "$CLUSTER_NAME" \
+            --service "$SERVICE_NAME" \
             --force-new-deployment \
             --region ${{ env.AWS_REGION }}
+          
+          echo "⏳ Waiting for service to stabilize..."
           aws ecs wait services-stable \
-            --cluster "${{ needs.rollback-staging.outputs.cluster_name }}" \
-            --services "${{ needs.rollback-staging.outputs.service_name }}" \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SERVICE_NAME" \
             --region ${{ env.AWS_REGION }}
 
       - name: Verify rollback
@@ -159,9 +166,7 @@ jobs:
     needs: validate
     if: github.event.inputs.environment == 'production' || github.event.inputs.environment == 'both'
     runs-on: ubuntu-latest
-    outputs:
-      cluster_name: ${{ steps.current.outputs.cluster_name }}
-      service_name: ${{ steps.current.outputs.service_name }}
+    # outputs removed: cluster_name/service_name now fetched directly from AWS
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -225,14 +230,23 @@ jobs:
         env:
           IMAGE_TAG: ${{ needs.validate.outputs.image_tag }}
         run: |
+          CLUSTER_NAME="gestion-production-cluster"
+          # Get the service name directly from ECS
+          SERVICE_ARN=$(aws ecs list-services --cluster "$CLUSTER_NAME" --region ${{ env.AWS_REGION }} --query 'serviceArns[0]' --output text)
+          SERVICE_NAME=$(echo "$SERVICE_ARN" | sed 's|.*/||')
+          
+          echo "🔄 Forcing new deployment on cluster: $CLUSTER_NAME, service: $SERVICE_NAME"
+          
           aws ecs update-service \
-            --cluster "${{ needs.rollback-production.outputs.cluster_name }}" \
-            --service "${{ needs.rollback-production.outputs.service_name }}" \
+            --cluster "$CLUSTER_NAME" \
+            --service "$SERVICE_NAME" \
             --force-new-deployment \
             --region ${{ env.AWS_REGION }}
+          
+          echo "⏳ Waiting for service to stabilize..."
           aws ecs wait services-stable \
-            --cluster "${{ needs.rollback-production.outputs.cluster_name }}" \
-            --services "${{ needs.rollback-production.outputs.service_name }}" \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SERVICE_NAME" \
             --region ${{ env.AWS_REGION }}
 
       - name: Verify rollback
